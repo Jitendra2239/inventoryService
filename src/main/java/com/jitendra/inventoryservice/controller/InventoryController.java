@@ -14,7 +14,10 @@ import org.springframework.web.bind.annotation.*;
 public class InventoryController {
 
     private final InventoryService inventoryService;
-
+    @GetMapping("/hello")
+  public  String getHello(){
+      return "Hello World";
+  }
     @GetMapping("/{productId}")
     public Inventory getInventory(@PathVariable Long productId) {
         return inventoryService.getInventory(productId);
