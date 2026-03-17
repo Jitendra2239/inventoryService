@@ -1,55 +1,64 @@
 package com.jitendra.inventoryservice.controller;
 
-import com.jitendra.inventoryservice.dto.InventoryRequest;
+
+import com.jitendra.inventoryservice.dto.InventoryRequestDto;
+import com.jitendra.inventoryservice.dto.UpdateStockRequestDto;
 import com.jitendra.inventoryservice.model.Inventory;
 import com.jitendra.inventoryservice.service.InventoryService;
-import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
-
-
-
 @RestController
 @RequestMapping("/api/v1/inventory")
-@RequiredArgsConstructor
 public class InventoryController {
 
     private final InventoryService inventoryService;
-    @GetMapping("/hello")
-  public  String getHello(){
-      return "Hello World";
-  }
+
+    public InventoryController(InventoryService inventoryService) {
+        this.inventoryService = inventoryService;
+    }
+
+    // Create Inventory
+    @PostMapping
+    public Inventory createInventory(@RequestBody InventoryRequestDto requestDto) {
+
+        return inventoryService.createInventory(
+                requestDto.getProductId(),
+                requestDto.getQuantity()
+        );
+    }
+
+    // Get Inventory
     @GetMapping("/{productId}")
     public Inventory getInventory(@PathVariable Long productId) {
         return inventoryService.getInventory(productId);
     }
 
-    @PostMapping("/reserve")
-    public String reserveInventory(@RequestBody InventoryRequest request) {
+    // Check stock
+    @PostMapping("/check")
+    public String checkStock(@RequestBody InventoryRequestDto requestDto) {
 
-        inventoryService.reserveInventory(
-                request.getProductId(),
-                request.getQuantity());
+        inventoryService.checkStock(
+                requestDto.getProductId(),
+                requestDto.getQuantity()
+        );
 
-        return "Inventory reserved";
+        return "Stock available";
+    }
+    @PostMapping("/add-stock")
+    public Inventory addStock(@RequestBody UpdateStockRequestDto requestDto) {
+
+        return inventoryService.addStock(
+                requestDto.getProductId(),
+                requestDto.getQuantity()
+        );
     }
 
-    @PostMapping("/release")
-    public String releaseInventory(@RequestBody InventoryRequest request) {
+    // Reduce stock
+    @PutMapping("/reduce")
+    public Inventory reduceStock(@RequestBody InventoryRequestDto requestDto) {
 
-        inventoryService.releaseInventory(
-                request.getProductId(),
-                request.getQuantity());
-
-        return "Inventory released";
-    }
-
-    @PostMapping("/deduct")
-    public String deductInventory(@RequestBody InventoryRequest request) {
-
-        inventoryService.deductInventory(
-                request.getProductId(),
-                request.getQuantity());
-
-        return "Inventory deducted";
+        return inventoryService.reduceStock(
+                requestDto.getProductId(),
+                requestDto.getQuantity()
+        );
     }
 }

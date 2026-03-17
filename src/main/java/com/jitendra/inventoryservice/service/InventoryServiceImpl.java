@@ -1,83 +1,80 @@
 package com.jitendra.inventoryservice.service;
-
-
-
-import com.jitendra.event.InventoryFailedEvent;
-import com.jitendra.event.InventoryReservedEvent;
-import com.jitendra.event.OrderCreatedEvent;
-import com.jitendra.inventoryservice.exception.ResourceNotFoundException;
+import com.jitendra.event.*;
+import com.jitendra.inventoryservice.exception.InsufficientStockException;
+import com.jitendra.inventoryservice.exception.InventoryNotFoundException;
 import com.jitendra.inventoryservice.model.Inventory;
 import com.jitendra.inventoryservice.repository.InventoryRepository;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 
 import java.util.Optional;
 
 
-@Service
+
 @RequiredArgsConstructor
+@Service
 public class InventoryServiceImpl implements InventoryService {
 
     private final InventoryRepository inventoryRepository;
-    private final KafkaTemplate<String,Object> kafkaTemplate;
+    private  final KafkaTemplate<String,Object> kafkaTemplate;
+
+    @Override
+    public Inventory createInventory(Long productId, Integer quantity) {
+
+        Inventory inventory = new Inventory();
+        inventory.setProductId(productId);
+        inventory.setQuantity(quantity);
+
+        return inventoryRepository.save(inventory);
+    }
+
     @Override
     public Inventory getInventory(Long productId) {
 
         return inventoryRepository.findByProductId(productId)
                 .orElseThrow(() ->
-                        new ResourceNotFoundException("Inventory not found"));
+                        new InventoryNotFoundException(
+                                "Inventory not found for productId: " + productId));
     }
 
+
+
     @Override
-    public void reserveInventory(Long productId, Integer quantity) {
+    public Inventory reduceStock(Long productId, Integer quantity) {
 
         Inventory inventory = getInventory(productId);
 
-        if (inventory.getAvailableQuantity() < quantity) {
-            throw new RuntimeException("Not enough inventory");
+        if (inventory.getQuantity() < quantity) {
+            throw new InsufficientStockException(
+                    "Stock not available for productId: " + productId);
         }
 
-        inventory.setAvailableQuantity(
-                inventory.getAvailableQuantity() - quantity);
+        inventory.setQuantity(inventory.getQuantity() - quantity);
 
-        inventory.setReservedQuantity(
-                inventory.getReservedQuantity() + quantity);
-
-        inventoryRepository.save(inventory);
+        return inventoryRepository.save(inventory);
     }
-
-    @Override
-    public void releaseInventory(Long productId, Integer quantity) {
-
-        Inventory inventory = getInventory(productId);
-
-        inventory.setAvailableQuantity(
-                inventory.getAvailableQuantity() + quantity);
-
-        inventory.setReservedQuantity(
-                inventory.getReservedQuantity() - quantity);
-
-        inventoryRepository.save(inventory);
-    }
-
-    @Override
-    public void deductInventory(Long productId, Integer quantity) {
-
-        Inventory inventory = getInventory(productId);
-
-        inventory.setReservedQuantity(
-                inventory.getReservedQuantity() - quantity);
-
-        inventoryRepository.save(inventory);
-    }
-    public Boolean checkStock(Long productId, Integer quantity) {
+@Override
+    public boolean checkStock(Long productId, Integer quantity) {
        Optional<Inventory> inventory = inventoryRepository.findByProductId(productId);
        if(inventory.isPresent()) {
-           if (inventory.get().getAvailableQuantity() >=0) return true;
+           if (inventory.get().getQuantity() >=0) return true;
        }
         return true;
+    }
+    @Override
+    public Inventory addStock(Long productId, Integer quantity) {
+
+        Inventory inventory = inventoryRepository.findByProductId(productId)
+                .orElseThrow(() ->
+                        new InventoryNotFoundException(
+                                "Inventory not found for productId: " + productId));
+
+        inventory.setQuantity(inventory.getQuantity() + quantity);
+
+        return inventoryRepository.save(inventory);
     }
 
     @KafkaListener(topics = "order-created", groupId = "inventory-group")
@@ -98,15 +95,44 @@ public class InventoryServiceImpl implements InventoryService {
             kafkaTemplate.send("inventory-failed",event3);
         }
     }
-//    @KafkaListener(topics = "payment-success")
-//    public void reserveInventory(PaymentSuccessEvent event){
-//
-//        System.out.println("Reserving inventory");
-//
-//        InventoryReservedEvent inventoryEvent =
-//                new InventoryReservedEvent(event.getOrderId(),"P100");
-//
-//        kafkaTemplate.send("inventory-reserved", inventoryEvent);
-//
-//    }
+    @KafkaListener(topics = "product-created")
+    @SendTo
+    public InventoryCreatedEvent handleProductCreated(ProductCreatedEvent event) {
+
+        Inventory inventory = new Inventory();
+        inventory.setProductId(event.getProductId());
+        inventory.setQuantity(0);
+
+        inventoryRepository.save(inventory);
+
+        return new InventoryCreatedEvent(event.getProductId(), "CREATED");
+    }
+
+    @KafkaListener(topics = "inventory-check", groupId = "inventory-group")
+    public void checkStock(InventoryCheckEvent event) {
+
+       Optional<Inventory> inventory = inventoryRepository
+                .findByProductId(event.getProductId());
+
+        AddToCartResponseEvent response = new AddToCartResponseEvent();
+        response.setUserId(event.getUserId());
+        response.setProductId(event.getProductId());
+
+        if (inventory.isEmpty()  ) {
+            response.setSuccess(false);
+            response.setMessage("Out of stock");
+        }
+        else if(inventory.isPresent() && inventory.get().getQuantity() <event.getQuantity()){
+
+              response.setSuccess(false);
+            response.setMessage("Out of stock");
+
+        }
+            else {
+            response.setSuccess(true);
+            response.setMessage("Stock available");
+        }
+
+        kafkaTemplate.send("inventory-response", response);
+    }
 }
