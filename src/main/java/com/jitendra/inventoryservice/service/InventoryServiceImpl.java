@@ -10,6 +10,7 @@ import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 
+import java.util.List;
 import java.util.Optional;
 
 
@@ -57,11 +58,13 @@ public class InventoryServiceImpl implements InventoryService {
         return inventoryRepository.save(inventory);
     }
 @Override
-    public boolean checkStock(Long productId, Integer quantity) {
-       Optional<Inventory> inventory = inventoryRepository.findByProductId(productId);
-       if(inventory.isPresent()) {
-           if (inventory.get().getQuantity() >=0) return true;
-       }
+    public boolean checkStock(List<OrderItemDto> orderItemDtos) {
+        for (OrderItemDto orderItemDto : orderItemDtos) {
+            Optional<Inventory> inventory = inventoryRepository.findByProductId(orderItemDto.getProductId());
+            if (inventory.isPresent()) {
+                if (inventory.get().getQuantity() >= 0) return false;
+            }
+        }
         return true;
     }
     @Override
@@ -80,18 +83,27 @@ public class InventoryServiceImpl implements InventoryService {
     @KafkaListener(topics = "order-created", groupId = "inventory-group")
     public void consumeOrderCreated(OrderCreatedEvent event) {
 
-        boolean available = checkStock(event.getProductId(), event.getQuantity());
+        boolean available = checkStock(event.getItems());
         InventoryReservedEvent event1=new InventoryReservedEvent();
 
         if (available) {
+
+            for(OrderItemDto item : event.getItems()) {
+                reduceStock(item.getProductId(), item.getQuantity());
+            }
             InventoryReservedEvent event2=new InventoryReservedEvent();
             event2.setOrderId(event.getOrderId());
-            event2.setProductId(event.getProductId());
+            event2.setAmount(event.getTotalAmount());
+            event2.setUserId(event.getUserId());
+            event2.setFirstName(event.getFirstName());
+            event2.setEmail(event.getEmail());
+            event2.setPhone(event.getPhone());
             kafkaTemplate.send("inventory-reserved",event2 );
         } else {
             InventoryFailedEvent  event3=new InventoryFailedEvent();
             event3.setOrderId(event.getOrderId());
-            event3.setProductId(event.getProductId());
+            event3.setReason("Inventory Reservation Failed");
+            event3.setTimestamp(System.currentTimeMillis());
             kafkaTemplate.send("inventory-failed",event3);
         }
     }
@@ -134,5 +146,20 @@ public class InventoryServiceImpl implements InventoryService {
         }
 
         kafkaTemplate.send("inventory-response", response);
+    }
+
+    @KafkaListener(topics = "order-cancelled")
+    public void handleOrderCancelled(OrderCancelledEvent event) {
+
+        for (OrderItemDto item : event.getItems()) {
+
+            Optional<Inventory> inventory = Optional.ofNullable(inventoryRepository.findByProductId(item.getProductId()).orElseThrow(() -> new InventoryNotFoundException("Inventory not found")));
+
+            inventory.get().setQuantity(
+                    inventory.get().getQuantity() + item.getQuantity()
+            );
+
+            inventoryRepository.save(inventory.get());
+        }
     }
 }
