@@ -1,15 +1,23 @@
 package com.jitendra.inventoryservice.service;
+
 import com.jitendra.event.*;
-import com.jitendra.inventoryservice.exception.InsufficientStockException;
+import com.jitendra.inventoryservice.dto.InventoryRequestDto;
+import com.jitendra.inventoryservice.dto.InventoryResponseDto;
+import com.jitendra.inventoryservice.dto.StockCheckRequestDto;
+
 import com.jitendra.inventoryservice.exception.InventoryNotFoundException;
+import com.jitendra.inventoryservice.mapper.InventoryMapper;
 import com.jitendra.inventoryservice.model.Inventory;
 import com.jitendra.inventoryservice.repository.InventoryRepository;
+import org.apache.kafka.common.errors.ResourceNotFoundException;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.stereotype.Service;
 import lombok.RequiredArgsConstructor;
 
+import java.lang.module.ResolutionException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -22,73 +30,84 @@ public class InventoryServiceImpl implements InventoryService {
     private final InventoryRepository inventoryRepository;
     private  final KafkaTemplate<String,Object> kafkaTemplate;
 
+
     @Override
-    public Inventory createInventory(Long productId, Integer quantity) {
+    public InventoryResponseDto createInventory(InventoryRequestDto dto) {
 
-        Inventory inventory = new Inventory();
-        inventory.setProductId(productId);
-        inventory.setQuantity(quantity);
+        Inventory inventory = InventoryMapper.toEntity(dto);
 
-        return inventoryRepository.save(inventory);
+        Inventory saved = inventoryRepository.save(inventory);
+
+        return InventoryMapper.toDto(saved);
     }
 
     @Override
-    public Inventory getInventory(Long productId) {
-
-        return inventoryRepository.findByProductId(productId)
-                .orElseThrow(() ->
-                        new InventoryNotFoundException(
-                                "Inventory not found for productId: " + productId));
-    }
-
-
-
-    @Override
-    public Inventory reduceStock(Long productId, Integer quantity) {
-
-        Inventory inventory = getInventory(productId);
-
-        if (inventory.getQuantity() < quantity) {
-            throw new InsufficientStockException(
-                    "Stock not available for productId: " + productId);
-        }
-
-        inventory.setQuantity(inventory.getQuantity() - quantity);
-
-        return inventoryRepository.save(inventory);
-    }
-@Override
-    public boolean checkStock(List<OrderItemDto> orderItemDtos) {
-        for (OrderItemDto orderItemDto : orderItemDtos) {
-            Optional<Inventory> inventory = inventoryRepository.findByProductId(orderItemDto.getProductId());
-            if (inventory.isPresent()) {
-                if (inventory.get().getQuantity() >= 0) return false;
-            }
-        }
-        return true;
-    }
-    @Override
-    public Inventory addStock(Long productId, Integer quantity) {
+    public InventoryResponseDto getInventory(String productId) {
 
         Inventory inventory = inventoryRepository.findByProductId(productId)
                 .orElseThrow(() ->
                         new InventoryNotFoundException(
                                 "Inventory not found for productId: " + productId));
 
-        inventory.setQuantity(inventory.getQuantity() + quantity);
-
-        return inventoryRepository.save(inventory);
+        return InventoryMapper.toDto(inventory);  // ✅ FIX
     }
 
+
+
+    @Override
+    public InventoryResponseDto reduceStock(String productId, Integer quantity) {
+
+        Inventory inventory = inventoryRepository.findByProductId(productId)
+                .orElseThrow(() -> new RuntimeException("Product not found"));
+
+        if (inventory.getQuantity() < quantity) {
+            throw new RuntimeException("Insufficient stock");
+        }
+
+        inventory.setQuantity(inventory.getQuantity() - quantity);
+
+        return InventoryMapper.toDto(inventoryRepository.save(inventory));
+    }
+
+    @Override
+    public InventoryResponseDto addStock(String productId, Integer quantity) {
+
+        Inventory inventory = inventoryRepository.findByProductId(productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found"));
+
+        inventory.setQuantity(inventory.getQuantity() + quantity);
+
+        return InventoryMapper.toDto(inventoryRepository.save(inventory));
+    }
+    @Override
+    public boolean checkStock(List<StockCheckRequestDto> items) {
+
+        for (StockCheckRequestDto item : items) {
+
+            Inventory inventory = inventoryRepository.findByProductId(item.getProductId())
+                    .orElseThrow(() -> new RuntimeException("Product not found"));
+
+            if (inventory.getQuantity() < item.getQuantity()) {
+                return false;
+            }
+        }
+        return true;
+    }
     @KafkaListener(topics = "order-created", groupId = "inventory-group")
     public void consumeOrderCreated(OrderCreatedEvent event) {
-
-        boolean available = checkStock(event.getItems());
+        List<StockCheckRequestDto> items =new ArrayList<>();
+        for (OrderItemEvent item : event.getItems()) {
+            StockCheckRequestDto stockCheckRequestDto = new StockCheckRequestDto();
+            stockCheckRequestDto.setProductId(item.getProductId());
+            stockCheckRequestDto.setQuantity(item.getQuantity());
+            items.add(stockCheckRequestDto);
+        }
+        boolean available = checkStock(items);
         InventoryReservedEvent event1=new InventoryReservedEvent();
 
         if (available) {
 
-            for(OrderItemDto item : event.getItems()) {
+            for(OrderItemEvent item : event.getItems()) {
                 reduceStock(item.getProductId(), item.getQuantity());
             }
             InventoryReservedEvent event2=new InventoryReservedEvent();
@@ -100,7 +119,7 @@ public class InventoryServiceImpl implements InventoryService {
             event2.setPhone(event.getPhone());
             kafkaTemplate.send("inventory-reserved",event2 );
         } else {
-            InventoryFailedEvent  event3=new InventoryFailedEvent();
+            InventoryFailedEvent event3=new InventoryFailedEvent();
             event3.setOrderId(event.getOrderId());
             event3.setReason("Inventory Reservation Failed");
             event3.setTimestamp(System.currentTimeMillis());
@@ -151,7 +170,7 @@ public class InventoryServiceImpl implements InventoryService {
     @KafkaListener(topics = "order-cancelled")
     public void handleOrderCancelled(OrderCancelledEvent event) {
 
-        for (OrderItemDto item : event.getItems()) {
+        for (OrderItemEvent item : event.getItems()) {
 
             Optional<Inventory> inventory = Optional.ofNullable(inventoryRepository.findByProductId(item.getProductId()).orElseThrow(() -> new InventoryNotFoundException("Inventory not found")));
 

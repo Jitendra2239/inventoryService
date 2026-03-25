@@ -1,19 +1,18 @@
 package com.jitendra.inventoryservice.service;
 
-
-import com.jitendra.event.OrderItemDto;
-import com.jitendra.inventoryservice.model.Inventory;
+import com.jitendra.inventoryservice.dto.*;
 
 import java.util.List;
 
 public interface InventoryService {
 
-    Inventory createInventory(Long productId, Integer quantity);
+    InventoryResponseDto createInventory(InventoryRequestDto dto);
 
-    Inventory getInventory(Long productId);
+    InventoryResponseDto getInventory(String productId);
 
-    boolean checkStock(List<OrderItemDto> orderItemDtos);
+    boolean checkStock(List<StockCheckRequestDto> items);
 
-    Inventory reduceStock(Long productId, Integer quantity);
-    Inventory addStock(Long productId, Integer quantity);
+    InventoryResponseDto reduceStock(String productId, Integer quantity);
+
+    InventoryResponseDto addStock(String productId, Integer quantity);
 }

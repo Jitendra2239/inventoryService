@@ -2,14 +2,14 @@ package com.jitendra.inventoryservice.dto;
 
 public class UpdateStockRequestDto {
 
-    private Long productId;
+    private String productId;
     private Integer quantity;
 
-    public Long getProductId() {
+    public String getProductId() {
         return productId;
     }
 
-    public void setProductId(Long productId) {
+    public void setProductId(String productId) {
         this.productId = productId;
     }
 

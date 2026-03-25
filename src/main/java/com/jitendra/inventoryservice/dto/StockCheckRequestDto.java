@@ -7,8 +7,8 @@ import lombok.*;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class InventoryRequestDto {
+public class StockCheckRequestDto {
 
-    private String  productId;
+    private String productId;
     private Integer quantity;
 }
