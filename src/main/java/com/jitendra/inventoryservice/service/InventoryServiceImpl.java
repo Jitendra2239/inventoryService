@@ -95,6 +95,7 @@ public class InventoryServiceImpl implements InventoryService {
     }
     @KafkaListener(topics = "order-created", groupId = "inventory-group")
     public void consumeOrderCreated(OrderCreatedEvent event) {
+        System.out.println("Received OrderCreatedEvent : " + event);
         List<StockCheckRequestDto> items =new ArrayList<>();
         for (OrderItemEvent item : event.getItems()) {
             StockCheckRequestDto stockCheckRequestDto = new StockCheckRequestDto();
@@ -114,9 +115,8 @@ public class InventoryServiceImpl implements InventoryService {
             event2.setOrderId(event.getOrderId());
             event2.setAmount(event.getTotalAmount());
             event2.setUserId(event.getUserId());
-            event2.setFirstName(event.getFirstName());
             event2.setEmail(event.getEmail());
-            event2.setPhone(event.getPhone());
+
             kafkaTemplate.send("inventory-reserved",event2 );
         } else {
             InventoryFailedEvent event3=new InventoryFailedEvent();
